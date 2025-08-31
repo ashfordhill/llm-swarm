@@ -1,0 +1,172 @@
+# LLM Swarm Configuration
+# This file defines models, agents, and system settings
+
+models:
+  # Orchestrator model (API-based for powerful reasoning)
+  orchestrator:
+    name: "orchestrator"
+    type: "api"
+    model_id: "gpt-4"
+    api_key_env: "OPENAI_API_KEY"
+    api_base: null  # Use default OpenAI API
+    max_tokens: 4096
+    temperature: 0.3
+    timeout: 120
+
+  # Alternative orchestrator using Claude
+  orchestrator_claude:
+    name: "orchestrator_claude"
+    type: "api"
+    model_id: "claude-3-sonnet-20240229"
+    api_key_env: "ANTHROPIC_API_KEY"
+    max_tokens: 4096
+    temperature: 0.3
+    timeout: 120
+
+  # API model for SME agents (reliable and no setup required)
+  api_coder:
+    name: "api_coder"
+    type: "api"
+    model_id: "gpt-3.5-turbo"
+    api_key_env: "OPENAI_API_KEY"
+    api_base: null
+    max_tokens: 2048
+    temperature: 0.7
+    timeout: 60
+
+  # Local model for SME agents (optional - requires additional setup)
+  local_coder:
+    name: "local_coder"
+    type: "local"
+    model_id: "microsoft/DialoGPT-medium"  # Placeholder - replace with actual coding model
+    max_tokens: 2048
+    temperature: 0.7
+    device: "auto"
+    quantization: null  # Options: "4bit", "8bit", null
+    max_memory: null
+
+  # Alternative local models (uncomment to use)
+  # codellama_7b:
+  #   name: "codellama_7b"
+  #   type: "local"
+  #   model_id: "codellama/CodeLlama-7b-Instruct-hf"
+  #   max_tokens: 2048
+  #   temperature: 0.7
+  #   device: "auto"
+  #   quantization: "4bit"
+
+  # starcoder:
+  #   name: "starcoder"
+  #   type: "local"
+  #   model_id: "bigcode/starcoder"
+  #   max_tokens: 2048
+  #   temperature: 0.7
+  #   device: "auto"
+
+agents:
+  # Frontend development agent
+  frontend:
+    name: "Frontend Agent"
+    agent_type: "frontend"
+    model: "api_coder"
+    system_prompt_template: |
+      You are an expert frontend developer with deep knowledge of modern web technologies including:
+      - React, Vue.js, Angular
+      - HTML5, CSS3, JavaScript/TypeScript
+      - Responsive design and accessibility
+      - State management (Redux, Vuex, etc.)
+      - Build tools (Webpack, Vite, etc.)
+      - UI frameworks (Bootstrap, Tailwind, Material-UI)
+    max_retries: 3
+    enabled: true
+
+  # Backend development agent
+  backend:
+    name: "Backend Agent"
+    agent_type: "backend"
+    model: "api_coder"
+    system_prompt_template: |
+      You are an expert backend developer with extensive experience in:
+      - Server-side frameworks (Express.js, Django, Flask, FastAPI, Spring Boot)
+      - RESTful API design and implementation
+      - Database integration and ORM usage
+      - Authentication and authorization
+      - Error handling and logging
+      - Performance optimization
+      - Security best practices
+    max_retries: 3
+    enabled: true
+
+  # Database development agent
+  database:
+    name: "Database Agent"
+    agent_type: "database"
+    model: "api_coder"
+    system_prompt_template: |
+      You are an expert database developer and architect with deep knowledge of:
+      - Relational databases (PostgreSQL, MySQL, SQLite)
+      - NoSQL databases (MongoDB, Redis)
+      - Database schema design and normalization
+      - Query optimization and indexing
+      - ORM frameworks (SQLAlchemy, Mongoose, Prisma)
+      - Database migrations and versioning
+      - Data modeling best practices
+    max_retries: 3
+    enabled: true
+
+  # Testing agent
+  testing:
+    name: "Testing Agent"
+    agent_type: "testing"
+    model: "api_coder"
+    system_prompt_template: |
+      You are an expert software testing engineer with comprehensive knowledge of:
+      - Unit testing frameworks (Jest, pytest, JUnit, etc.)
+      - Integration and end-to-end testing
+      - Test-driven development (TDD)
+      - Mocking and stubbing techniques
+      - Test automation and CI/CD integration
+      - Performance and load testing
+      - Code coverage analysis
+    max_retries: 3
+    enabled: true
+
+  # Documentation agent
+  documentation:
+    name: "Documentation Agent"
+    agent_type: "documentation"
+    model: "api_coder"
+    system_prompt_template: |
+      You are an expert technical writer specializing in software documentation. You have extensive experience with:
+      - API documentation and specifications
+      - User guides and tutorials
+      - Code documentation and comments
+      - README files and project documentation
+      - Markdown and documentation tools
+      - Information architecture and organization
+    max_retries: 3
+    enabled: true
+
+# Orchestrator configuration
+orchestrator:
+  model: "orchestrator"  # Which model to use for orchestration
+  planning_prompt_template: |
+    You are a senior software architect and project manager. Your task is to analyze a project specification and create a detailed implementation plan.
+  max_tasks: 50
+  parallel_execution: false  # Set to true for parallel task execution (experimental)
+  max_parallel_tasks: 3
+
+# Output and project settings
+output_settings:
+  create_git_repo: true
+  include_readme: true
+  include_gitignore: true
+  include_license: false
+  default_license: "MIT"
+
+# Logging configuration
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "logs/llm-swarm.log"
+  max_file_size: "10MB"
+  backup_count: 5

@@ -1,0 +1,16 @@
+# Core dependencies for LLM Swarm
+openai>=1.0.0
+anthropic>=0.7.0
+transformers>=4.35.0
+torch>=2.0.0
+pyyaml>=6.0
+pydantic>=2.0.0
+jinja2>=3.1.0
+rich>=13.0.0
+click>=8.1.0
+
+# Optional dependencies for enhanced functionality
+# langchain>=0.0.300  # For advanced agent orchestration
+# huggingface-hub>=0.17.0  # For model management
+# accelerate>=0.24.0  # For optimized model loading
+# bitsandbytes>=0.41.0  # For quantization support

@@ -1,0 +1,44 @@
+Create a simple Python command-line tool called "greeter" with the following features:
+
+Core Functionality:
+1. Greet users by name with customizable messages
+2. Support different greeting styles (formal, casual, enthusiastic)
+3. Log all greetings to a file with timestamps
+4. Display help information and usage examples
+
+Technical Requirements:
+- Python 3.8+ compatibility
+- Use argparse for command-line argument parsing
+- Implement proper logging with configurable levels
+- Include comprehensive error handling
+- Follow PEP 8 style guidelines
+- Use type hints throughout the code
+
+Command-line Interface:
+- `greeter --name "John" --style casual` - Greet John casually
+- `greeter --name "Dr. Smith" --style formal` - Formal greeting
+- `greeter --help` - Show help and usage
+- `greeter --version` - Show version information
+- `greeter --log-level DEBUG` - Set logging level
+
+File Structure:
+- Main executable script
+- Configuration file for default settings
+- Log file for greeting history
+- Setup script for installation
+- Requirements file for dependencies
+
+Quality Assurance:
+- Unit tests for all functions
+- Integration tests for CLI interface
+- Test coverage > 90%
+- Input validation and sanitization
+- Proper exception handling
+
+Documentation:
+- Comprehensive README with installation and usage instructions
+- Inline code documentation
+- Example usage scenarios
+- Troubleshooting guide
+
+The tool should be simple, well-documented, and demonstrate best practices for Python CLI development.
