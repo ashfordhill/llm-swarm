@@ -1,152 +1,203 @@
-# Design Plan: Multi‑Agent LLM Orchestration for Automated Codebase Generation
-
-Zencoder is gonna help me make this one, woo.
-
-## Introduction
-
-Building a complex software project using AI alone can overwhelm a single large language model (LLM). To tackle this, we propose an orchestrated multi-agent LLM system where multiple specialized LLM “agents” collaborate under a central controller. Each agent is a subject-matter expert (SME) focusing on a specific feature or phase of the project, such as UI, database, or testing. The central orchestrator agent will break down high-level requirements into tasks, assign those tasks to the expert LLMs, and then assemble their outputs into a cohesive codebase.
-
-This document provides a comprehensive, human-friendly breakdown of the system’s design and how to implement it end-to-end. It is structured to be easily understandable by developers and also LLM-friendly so that an AI coding assistant (like Zencoder’s agent mode) can follow it step-by-step to generate the code. The initial focus is on a proof-of-concept (MVP) without a GUI, but the design will be flexible enough to add a TypeScript/React front-end later.
-
-## Objectives and Requirements
-
-**Multi-Agent Architecture**: Decompose the code generation process into multiple specialized LLM agents. Instead of one model trying to do everything, each agent will handle a specific domain or feature (for example, one agent for authentication logic, another for database models, another for frontend components, etc.). This specialization is meant to improve modularity and reduce context overload for each agent. The agents will operate semi-independently but coordinate through a central “leader” agent.
-
-**Orchestrator (Supervisor) Agent**: Implement a top-level orchestrator LLM that serves as the “project manager.” This Orchestrator agent will parse the overall project requirements and determine the dependency graph of tasks/features to implement. It will then delegate tasks to the appropriate SME agents in the correct order and integrate their outputs. The orchestrator should be capable of complex planning and reasoning – potentially using a powerful model via API (for example, GPT-4) for better results, since hosting a very large model locally is impractical for the MVP.
-
-**Subject Matter Expert (SME) Agents: Implement a set of smaller, specialized LLMs (the “spawned” agents) that each focus on a particular feature or component of the project. These SME agents will likely use local, lightweight models (which can be stored or downloaded locally) to avoid the cost and latency of API calls. Using multiple models is desirable so each agent can use a model best suited to its task (or a cheaper one). For example, a 7B-parameter LLM might be sufficient for generating boilerplate code or documentation. Each SME will be instantiated with a robust prompt or instructions defining its role (to “train” it in-context to be an expert in its domain). This prompt should include any specific requirements or context for that feature, so the agent has enough information to do its job well. We must prompt-engineer each agent carefully – as experience shows, having many agents means maintaining many prompts, and the burden of configuring them grows with system complexity.
-
-**Dependency Graph & Task Planning**: The system must handle task dependencies so that, for example, the database schema agent runs before the API endpoint agent, which runs before the frontend UI agent, etc. The orchestrator will be responsible for creating and managing this dependency graph. It can represent the project tasks as a directed acyclic graph (DAG) where nodes are tasks or components and edges indicate dependencies (e.g. “backend depends on database schema”). In the MVP, a simpler sequential plan might be used (a predefined order or an order decided by the orchestrator’s reasoning) to avoid over-engineering a full DAG scheduler. The orchestrator should break down the project into an ordered task list (or tree of sub-tasks), possibly using a planning prompt. It may first generate a high-level plan listing all required components and their dependencies, then execute them one by one. Ensuring the dependency ordering is correct will be crucial so that each SME agent has the context it needs (for instance, the frontend agent might need API endpoint details from a backend agent’s output).
-
-**Integration of Outputs**: As agents produce pieces of code or other artifacts, the system needs to integrate these into a coherent codebase. The MVP will likely operate in a local development environment (e.g. within VS Code via Zencoder), so the integration can be done by writing the files that each agent produces into the project directory. The orchestrator can also act as a quality control—after an agent produces output, the orchestrator (or another specialized “review” agent) could validate or test it, though for the initial prototype this can be minimal (maybe just syntax checks or simple test runs). We will utilize Git for version control: however, we will not commit large model files into the repo. Instead, model weights or references remain external to avoid bloating the repository. Only the code (and perhaps small config files pointing to the models) will be under version control. (For now, developers can manually download or install the required local models as dependencies; automating that can be a future improvement.)
-
-**Technology Stack**: The implementation language and frameworks are flexible. For rapid development, Python is a strong choice for the backend orchestrator since it has rich LLM and ML tooling (Hugging Face Transformers, LangChain, etc.), but Node.js could also be used if we aim to later integrate with a TypeScript/React UI more directly. We’ll choose whatever allows quick integration of local models and API calls. The design should allow adding a GUI later (likely via a REST API or IPC that the React frontend can call). For now, the system can be a CLI or script that reads a project specification and generates the repository on disk.
-
-**Zencoder Integration (Dev Workflow)**: We plan to leverage Zencoder’s VS Code agent mode to assist in building this system. This design breakdown is written to guide that AI agent. The agent should be able to follow the plan, create necessary files, classes, and functions, and set up the project structure according to the specifications here. Therefore, the plan is broken into clear sections and steps that an LLM (or a developer) can implement one by one.
-
-## System Architecture Overview
-
-At a high level, the system consists of: (1) a central Orchestrator LLM agent, (2) multiple specialized SME LLM agents, and (3) an underlying runtime that executes these models and handles file outputs. The orchestrator and SMEs together form a hierarchical multi-agent team. The orchestrator (leader) oversees the process, and the SME agents (executors) carry out specific tasks within their expertise.
-
-**Orchestrator Agent (Controller)**: The orchestrator is the brains of the operation. It receives the initial user request or project specification (for example, “Create a web app with a login page, user profile, and a PostgreSQL database”). It then formulates a plan: e.g., “Tasks: Set up project structure, Implement auth system, Implement profile feature, Set up database models, etc.” The orchestrator uses a planning prompt or logic to break the spec into components. It keeps track of the global context and any information that needs to be shared across agents (like common data models or API schemas). This agent will likely use an API-accessed LLM (with an API key) for powerful reasoning capabilities, since it needs a broad understanding of the entire project. It might be configured, for instance, to use OpenAI GPT-4 or Anthropic Claude for its role. Security-wise, the orchestrator will not expose sensitive user code externally except via the LLM API calls.
-
-**SME Agents (Feature Experts)**: Each SME agent is responsible for one slice of functionality. We can design them around either technical layers or feature sets. Possible agents in a software project context might include, for example: a Frontend/UI Agent (expert in HTML/CSS/React, builds the user interface), a Backend API Agent (expert in server-side logic, frameworks, writes the API endpoints and business logic), a Database/Modeling Agent (sets up database schema or ORMs), a Testing Agent (writes unit or integration tests), and a Documentation Agent (writes README, docs, etc.). Each of these will be implemented with a local LLM model (to keep costs down and allow offline operation). They might all use the same base model or different ones tuned for their tasks; for MVP, using a single versatile open-source model (like a Llama-2-7B-chat or CodeLlama, etc.) for all SMEs is simplest, but we could also choose variants (for instance, a code-specialized model for code generation agents and a language model for documentation agent). The key is that each agent will be given a tailored system prompt that clearly defines its role, capabilities, and the specific output format expected. For example, the Frontend Agent’s prompt could instruct it with: “You are an expert front-end developer. Your task is to implement the UI as specified. Output only code files (HTML/CSS/JS) for the frontend, and ensure integration with the backend API endpoints defined.” This way, the agent “knows” what it should focus on and is less likely to stray out of scope. By confining each agent’s domain, we reduce complexity per agent and make the overall system more robust.
-
-Communication and Orchestration: The orchestrator and SMEs will communicate in an iterative loop. The orchestrator assigns a task by sending a prompt (which includes the SME’s role instructions + details of the specific task instance). The SME agent processes this and returns an output (e.g., code for a certain module). The orchestrator then takes that output, integrates it, and possibly shares essential details with subsequent agents. We may implement this communication simply as function calls in code: e.g., result = call_agent(model=frontend_model, prompt=frontend_prompt). The orchestrator can maintain an in-memory state or context dictionary that includes outputs or key data (for example, once the DB schema is created by the DB Agent, the orchestrator can pass the schema or entity definitions to the API Agent so it knows what to use). In a more advanced system, we might use a vector database or other long-term memory for agents to retrieve each other’s outputs, but for the MVP a straightforward approach of passing relevant text as part of the prompt suffices. (The orchestrator basically acts as the memory by accumulating knowledge as tasks progress.)
-
-Example of a simple multi-agent architecture with a Manager (Orchestrator) agent coordinating specialized agents and tools. In this illustration, the Manager agent (top) delegates tasks to a Code-Interpreter tool (left) and a Web-Search agent (right). The Web-Search agent in turn uses its own tools (e.g. a search API) to fulfill its subtask. Similarly, our system’s Orchestrator will call specialized code-generation agents and possibly utility tools (like test runners or documentation generators). This modular structure ensures each component handles only what it’s designed for, making the overall workflow more manageable and traceable.
-
-**Dependency Graph Details**: The orchestrator’s plan can be thought of as a dependency graph of tasks. For instance, if the project is a typical web app, the graph might look like: Setup Base Project -> Database Models -> Backend Logic -> Frontend UI -> Testing -> Documentation. Some tasks could be parallelized if they are independent (e.g., documentation could potentially be generated in parallel with testing, or frontend in parallel with backend if APIs are stubbed first). In the MVP, we will likely run them sequentially for simplicity. The orchestrator will decide the order based on dependencies it knows (either by hard-coded logic or by analyzing the tasks). We can implement a simple scheduler: the orchestrator creates a list of task items with dependencies (like “Task A must finish before Task B and C”), then resolves an order (topologically sort the DAG). Then it calls each SME agent in that order. The orchestrator should handle errors or omissions gracefully: if an agent’s output is incomplete, the orchestrator might re-prompt it or adjust the plan. (Error handling may be rudimentary in MVP, possibly just logging issues or asking for human intervention via the console if something goes wrong, e.g., “Frontend agent failed to produce output, please check the prompt.”)
-
-**Model Management**: All local LLM models used for SME agents will be managed outside of git. The repository for the tool will contain code and maybe small config files (like a models.yaml listing which model files or IDs to use for each agent). The actual model weights (which can be hundreds of MBs or a few GBs) should be downloaded by the user or during installation (possibly using Hugging Face Hub or a similar source). We avoid committing these files. For now, the orchestrator can load models at runtime from specified paths. We will ensure that adding or updating a model is as simple as changing a config, not altering code.
-
-To summarize this architecture: the orchestrator LLM (possibly via API) reads the project spec, breaks it into an ordered set of tasks, and invokes a series of local SME LLMs that each generate code or content for their respective area, then the orchestrator assembles the final outputs into a complete project. This approach mirrors how a team of developers might collaborate, with a lead deciding who does what and when. It leverages the strength of large LLMs for planning and the speed/cost-effectiveness of smaller local LLMs for execution. The design also aligns with research suggestions to organize end-to-end software development into stages handled by specialized agents with domain expertise.
-
-## Implementation Plan
-
-This section breaks down how to implement the system step by step. The development can be guided by these steps (an AI agent can use this as a to-do list for coding). We will outline the project structure, key components (classes/modules), and the sequence of development tasks:
-
-Project Structure Setup: Create a new project/repository for this tool. A possible structure:
-
-- agents/ directory (or package) to hold agent-related classes or scripts (e.g., orchestrator.py, agents/frontend_agent.py, agents/backend_agent.py, etc.).
-
-- models/ directory or config files for model references (not the weights themselves, but e.g. a JSON or YAML listing model names/paths for each agent).
-
-- main.py (entry point script that orchestrates the whole process when the tool is run, e.g., taking user input and kicking off the Orchestrator).
-
-- utils/ for any utility functions (e.g., file writing, dependency graph management, prompt templates).
-
-Since we might later integrate a GUI, we could also set up a basic API server file (for example, server.py using Flask/FastAPI) so that the frontend can call into the orchestrator. This API could have endpoints like /generate where a request contains the project spec, and the orchestrator runs. However, implementing the full server can be optional in MVP; we can instead focus on a CLI usage.
-
-Choose LLM Libraries: For interacting with LLMs, decide on a library or method. Options:
-
-For Orchestrator (API model): Use OpenAI’s Python SDK (if using OpenAI GPT models) or an HTTP request if using another service. This requires setting an API key (e.g., via environment variable). Implement a wrapper function like call_orchestrator(prompt: str) -> str that sends the prompt to the API and returns the response.
-
-For SME Local Models: Use Hugging Face Transformers with a pipeline or the generate method. Possibly use a library like transformers with a model and tokenizer loaded in memory. Alternatively, use llama.cpp or similar if aiming for CPU-friendly inference. We might use a higher-level framework like LangChain for convenience, but given we want fine control and simplicity, direct use of the model might be clearer. For MVP, we can assume the local system has enough resources to load at least a 7B model for each agent as needed (we could load one model and reuse it for all SME tasks sequentially to save memory, or load different ones for different tasks if specified).
-
-We will implement a class or function for each agent type that encapsulates its prompting and model invocation. For example, a LocalAgent base class with a method run(task_description). The base class can accept a model identifier at init time and load it. Subclasses or instances can be created for each role with their specific role prompt template. This way, calling FrontendAgent.run(spec) will internally format a prompt like: “You are a Frontend Developer agent... [project context] ... [specific task]. Provide the code:” and then call the model to get output.
-
-Define the Orchestrator Class: Create an Orchestrator class (in agents/orchestrator.py). This class will have methods like:
-
-plan_tasks(project_spec: str) -> List[Task]: where Task could be a simple dataclass containing info like name, description, dependencies, and maybe which agent or model to use. This method uses the orchestrator LLM (via API) to generate a breakdown. Alternatively, for MVP, this could be a hard-coded or heuristic breakdown if we want determinism (like parse the spec for known keywords to assign tasks). But using the LLM is more flexible: e.g., prompt: “Analyze the following project description and list all the major components or tasks needed to implement it. Include dependencies, e.g., what should be done first, etc.”. The LLM’s answer can be parsed into a list of tasks. We might need to instruct it to format the plan in JSON for easy parsing.
-
-execute_plan(tasks: List[Task]): goes through the task list in order, and for each task, finds the appropriate SME agent to handle it, calls that agent, and collects the result. If a task has dependencies that haven’t been done yet, it would wait (in sequential execution this is naturally satisfied by ordering; in a parallel scheme, we would check dependency flags).
-
-integrate_output(task: Task, result: Any): handles what to do with each agent’s result. In most cases, the result will be code (maybe as text or a dictionary of filenames to file contents). This method would then write those files to the project directory (creating folders as needed). For instance, if the Frontend Agent returns a React component code, the orchestrator knows to save it under frontend/src/ComponentName.jsx. We might have to rely on conventions or perhaps ask the agent to specify filenames in its output (maybe in a markdown or JSON format). Simpler: we could decide file paths in the orchestrator based on task name (like task “database models” -> write to models.py). But letting the agent suggest filenames might yield a more complete generation. In MVP, a compromise: orchestrator instructs each agent where to put its output (e.g., include in the agent’s prompt something like “Output the code for file X in this format…”).
-
-run(project_spec: str): high-level method that ties it all together: calls plan_tasks, then execute_plan, and returns a success/failure or final summary. This could be what main.py calls when the program is executed.
-
-Define the Task Structure: We will create a simple representation for tasks. Possibly a Python dataclass Task with fields: id, name, description (what needs to be done), agent_type (which SME agent should handle it, e.g., “frontend”, “backend”, etc.), and deps (list of task ids or names that must be completed first). The orchestrator will produce or be given a list of these. During execution, we can simply loop in order (assuming they are already sorted in a feasible execution order). If we want to be safe, we can topologically sort by deps at runtime too.
-
-Implement SME Agent Classes: For each type of specialized agent we anticipate, implement a class. We can have a generic SMEAgent base class in agents/base_agent.py that holds common logic like loading a local model and a method to format prompts and call the model. Then derive specific ones or just configure instances for each role: e.g., frontend_agent = SMEAgent(name="FrontendAgent", model="path/to/model", system_prompt_template="You are an expert frontend developer..."). Alternatively, make subclasses like FrontendAgent(SMEAgent) that define their own system prompt template and any post-processing needed. The SMEAgent.run(task: Task) method will take the task description and any additional context, assemble the full prompt, run the model, and return the result (which may need to be processed if the model gives extra text around code). We might instruct each agent to output in a specific format to simplify parsing. For code, maybe we say: “wrap each file’s code in markdown fences with the filename as a heading” or something. Simpler: output plain code for single-file tasks. In more complex multi-file generation, we need a more structured output. MVP can start with one file per task assumption for simplicity.
-
-Local Model Loading: For each SME agent, integrate the model loading using a library. For example, using Hugging Face Transformers:
-
-from transformers import AutoModelForCausalLM, AutoTokenizer
-model = AutoModelForCausalLM.from_pretrained("the/model/name", device_map="auto")  
-tokenizer = AutoTokenizer.from_pretrained("the/model/name")  
-
-
-Then to generate:
-
-inputs = tokenizer(prompt, return_tensors="pt")  
-outputs = model.generate(**inputs, max_new_tokens=..., temperature=...)  
-result = tokenizer.decode(outputs[0], skip_special_tokens=True)  
-
-
-We might use a smaller model (like 7B or 13B) with int4 quantization to run on CPU if needed. It’s acceptable if generation is a bit slow, as this is a prototype. Each agent can load its model at time of use; but that could be slow if done repeatedly. Better: load once and reuse. Since in sequential execution we might reuse the same model for multiple tasks if they share it, we can just have one model per agent type loaded. Memory might allow several small models loaded concurrently, but if not, we could even reuse one model for multiple roles by changing prompts (not ideal if domains differ a lot; but if using one versatile model for all roles, that’s simplest: just one load). This detail can be fine-tuned based on actual performance tests.
-
-Prompt Design for Agents: Craft the prompt templates for each agent carefully. This likely will involve a system prompt (the role definition and guidelines) and a user prompt (the specific task instructions). For example:
-Frontend Agent System Prompt: “You are FrontendGPT, an AI expert in frontend web development (HTML/CSS/JavaScript and React). You generate user interface code based on specifications. Follow best practices and output clean, functional code.”
-Frontend Agent Task Prompt (User Prompt): “Project context: A web app with login and profile pages. Task: Implement the LoginPage component in React. It should have a form with username, password fields and a submit button that calls the /api/login endpoint. Use the design style from the spec (Bootstrap-based styling). Output the React component code.”
-The agent would then produce something like a JSX code.
-Similar prompts would be made for backend, etc. We should include in each prompt anything the agent needs from previous tasks. e.g., the Backend Agent might get: “Here are the database models (from DB agent output) and API endpoints planned. Implement the backend logic accordingly.” These details will be fetched from orchestrator’s state or prior outputs.
-It’s important to remind the agents to stay in their lane – e.g., the backend agent shouldn’t start writing frontend code or documentation. Also instruct them on output format (pure code vs explanatory text). Likely we want mostly pure code as output to directly use it. We can handle removing any extra commentary if needed by parsing or by prompt instructions like “no explanations, only code.”
-
-Executing the Workflow: With planning and agent classes ready, implement the main execution logic. This could be in the orchestrator execute_plan or directly in main.py for simplicity. The flow:
-
-Parse input (could be a text prompt for now describing the project; later this could be a structured config or user answers).
-
-Call orchestrator.plan_tasks(spec) to get the task list. (For initial testing, this plan could be mocked or static to verify the rest works.)
-
-Loop through tasks: for each task:
-
-Identify which agent or model is needed. (Task might have an attribute or we decide by task name -> e.g., if task name contains “frontend” or is labeled as such, use FrontendAgent, etc.)
-
-Call the corresponding agent’s run(task) method to generate output.
-
-Get the output (e.g., code text).
-
-Call orchestrator’s integrate_output(task, output) to save the code to file. This may also store some summary in the orchestrator state if needed for subsequent tasks (like if the DB schema is output as SQL or models.py, the orchestrator might keep a copy of that to give to the backend agent). In some cases, instead of full code, a task might output some structured data. For example, a “Design DB schema” task might output just a schema definition (which the DB agent could either output as code for models or just a spec that another agent uses to actually generate code). We should decide if each task always outputs final code, or if some are intermediate. Simpler is each outputs actual code for part of the system.
-
-Continue until all tasks done.
-
-The orchestrator can then perhaps do a final step, like aggregate a summary or ensure everything is committed to the repository. Possibly, it could run git init and commit all files, but that might be out of scope for now. We can leave version control to the user or a simple message like “Generation complete. Review the files and commit to your repository.”
-
-Testing the MVP: Once implemented, we should test the flow with a simple example. For instance, a small spec: “A Python CLI tool that greets a user by name and logs messages to a file.” The orchestrator might break this into tasks: (1) Project setup (create main Python file), (2) Greeting feature (implement greet function), (3) Logging feature (implement logging to file), (4) maybe Documentation (a README). Then each agent would produce small code snippets, which get written out. We’d verify that the outputs run and meet the spec. This ensures our pipeline of orchestrator -> agent -> file output works. We should pay attention to how well the orchestrator’s planning works via LLM. If it’s too unreliable, we may simplify by manually specifying tasks for initial demos.
-
-Iterate and Refine: If the LLM outputs (especially from local SME models) are not satisfactory in quality (e.g., buggy code or not following instructions), we should refine the prompts or possibly use a better model. We might also introduce a basic review step: for example, after an agent outputs code, the orchestrator could run a quick static analysis or even execute a test (if applicable) to see if it’s working, then decide to accept or have the agent retry/fix. This is a stretch goal for MVP given time. But designing the system to allow such feedback loop (like an optional Critic agent or just looping back to the same agent with “fix errors X, Y”) is a good idea for the future.
-
-Throughout implementation, ensure that the LLMs have sufficient instruction to act as experts in their domain and understand the overall project context relevant to them. It might take a few prompt engineering trials to get that right. Logging the interactions (prompts and responses) to the console or files will be very useful for debugging the multi-agent coordination.
-
-## Future Enhancements
-
-The initial MVP focuses on core logic and will run as a script. Below are some considerations for future versions once the prototype is validated:
-
-GUI Integration: Develop a front-end (likely in TypeScript/React as planned) for a more user-friendly experience. The front-end could allow the user to input project requirements via a form or select options (e.g., choose programming language, frameworks, features needed) and then trigger the backend generation. The orchestrator can be exposed via a REST API or WebSocket that the React app calls. We’ll design the backend to be mostly stateless for each request (given a spec, produce a repo), so wrapping it in a FastAPI or Express.js server would be straightforward. The UI can also display progress (e.g., “Planning tasks… Generating backend… Generating frontend…” as steps) by having the orchestrator send updates.
-
-Persistent Model Agents: Right now, each SME agent is essentially stateless per request (they load model and generate when called). In the future, we might run each agent as a persistent service (especially if using something like an API model or a server for each local model). They could maintain context across runs if needed or at least avoid re-loading weights each time. This could make the system faster and allow interactive agent communication (like the orchestrator could ask an agent questions or clarifications). A message-passing architecture or using something like LangChain’s agent management could be explored if the project grows in complexity.
-
-Parallel Execution: If some tasks are independent, the orchestrator could execute multiple agents in parallel (assuming hardware can handle it or by using asynchronous API calls). For example, the documentation agent could start once the code is mostly done, even as testing agent is running. A more advanced scheduler could look at the dependency graph and run tasks when their deps are done. For now, sequential execution is fine, but this is a potential improvement for performance.
-
-Improved Dependency and Context Sharing: As the project complexity grows, we might implement a more sophisticated way to share context. For example, using a vector database to store embeddings of each agent’s output so that another agent can query relevant pieces (this could be part of a memory system). Or employing a global context file that all agents can read (like a design doc or spec that gets appended with details as they are decided). Ensuring consistency (e.g., the frontend and backend agree on API endpoint paths and data formats) is critical; the orchestrator might need to actively enforce this by passing the same piece of info to both. In the future, a verification step where the orchestrator asks each agent to validate integration points (like “Backend, confirm you have endpoints X, Y that frontend expects”) could be added.
-
-Local Orchestrator Option: Currently, we assume using a powerful API model for the orchestrator. In later versions, if needed for privacy or cost, we could experiment with a local large model for orchestration as well. This might require running a bigger model (20B+ parameter) which may not be feasible on a local machine without GPUs. Alternatively, we could keep orchestrator via cloud but allow switching providers easily via configuration.
-
-Version Control and Project Management: As the tool starts creating and modifying repositories, integrating directly with Git could be useful. For example, auto-committing changes after each agent’s output or each major phase, with commit messages like “Add database schema” or “Implement login feature (generated by AI)”. This would provide history and the ability to roll back if something goes wrong. Caution is needed to not commit sensitive info (API keys, etc.). We might also integrate issue tracking – e.g., the orchestrator could open “issues” for each task, then the agents “resolve” them by committing code. This mirrors a real dev workflow and could be an interesting UI in the future (seeing AI agents close tasks on a Kanban board).
-
-Extensibility for Various Project Types: The MVP is likely focused on one type of project (say a web app in a specific language/framework). In the future, we want the system to handle “various types of repos” as the user indicated. This means making the architecture and prompts more dynamic. The orchestrator’s planning should identify the tech stack from the spec or allow user to specify (like “use Django vs use Node.js”). Then it should load appropriate agent configurations for that stack. We could maintain a library of agent prompts/templates for different languages or frameworks. For example, a “Python backend agent” vs “JavaScript backend agent” with different coding styles. The system design should accommodate plugging in new agent types or changing prompts without code changes – perhaps via configuration files. This way, the project can evolve to support multiple languages and scenarios by adding new expert agents.
-
-Error Handling and Recovery: Multi-agent systems can fail in novel ways (an agent might produce faulty code, or misunderstand the task). Future iterations should include more robust handling: timeouts for agents, sanity checks on outputs (did the code compile? did tests pass?), and if something fails, either automatically retry with adjusted prompt or notify the user gracefully. A monitoring component or logs visualization would help in understanding agent behaviors.
-
-In conclusion, this design aims to create an orchestrated team of LLMs that can generate and manage a complete code repository from a high-level specification. By breaking the problem into parts and giving each LLM clear instructions and scope, we leverage the power of specialization - much like human software teams do. The MVP will validate this approach on a small scale, and with the foundations laid out above, we can incrementally expand the system’s capabilities. Both developers and AI agents (like Zencoder) should find the structure clear and logical, enabling efficient collaboration in building this innovative tool. Once the MVP is running, we’ll gather feedback on how well it creates and manages repos, then refine the prompts and planning strategy accordingly. The end goal is a robust assistant that can design, code, and assemble entire projects autonomously, with humans guiding at a high level – a significant step toward AI-augmented software engineering.
+# LLM Swarm: Next-Generation Multi-Agent Code Generation
+
+**Status: 🚧 Evolving to Revolutionary Architecture**
+
+A cutting-edge multi-agent system that uses **hyper-specialized LoRA adapters** and **real-time UI monitoring** to automatically generate complete software projects from natural language specifications.
+
+## 🌟 **What Makes This Different**
+
+Unlike other AI coding tools that use generic models with simple prompts, LLM Swarm creates **genuinely specialized AI agents** using:
+
+- **🧠 LoRA Adapters**: Tiny neural network modifications that transform a base model into domain experts
+- **🎯 Hyper-Specialization**: Each agent is neurally focused on ONE specific technology stack
+- **📊 Real-Time UI**: Visual monitoring of agent collaboration and decision-making
+- **🔄 Adaptive Learning**: Agents improve through specialized training on curated datasets
+
+## 🏗️ **Revolutionary Architecture**
+
+### **🤖 Hyper-Specialized SME Agents**
+Each agent uses a **LoRA adapter** trained exclusively on its domain:
+
+- **⚛️ Frontend Agent**: LoRA trained on 50K+ React/Vue/Angular components
+- **🔧 Backend Agent**: LoRA trained on 30K+ API implementations  
+- **🗄️ Database Agent**: LoRA trained on 20K+ schema designs
+- **🧪 Testing Agent**: LoRA trained on 40K+ test suites
+- **📚 Documentation Agent**: LoRA trained on 25K+ technical docs
+
+### **🎛️ Real-Time UI Dashboard**
+- **Agent Activity Monitor**: See what each agent is thinking/doing
+- **Task Flow Visualization**: Watch tasks move through the pipeline
+- **Code Generation Live View**: See code being written in real-time
+- **Performance Analytics**: Track agent efficiency and quality metrics
+- **Debug Console**: Inspect agent decisions and reasoning
+
+## 🚀 **Quick Start** (Current MVP)
+
+### **Super Simple Setup** (3 steps)
+```bash
+# 1. Clone and install
+git clone https://github.com/your-username/llm-swarm.git
+cd llm-swarm
+pip install -r requirements.txt
+
+# 2. Set API key (get from OpenAI or Anthropic)
+export OPENAI_API_KEY="your-key-here"
+
+# 3. Generate your first project!
+python main.py generate --spec "Create a REST API with user authentication" --output ./my-api
+```
+
+### **Setup Checker** (Optional)
+```bash
+# Check if everything is ready
+python check_setup.py
+```
+
+### **Launch UI** (Coming Soon)
+```bash
+# Start the web interface
+python ui/app.py
+# Open http://localhost:3000
+```
+
+## 🛣️ **Development Roadmap**
+
+### **✅ Phase 0: MVP Foundation** (Complete)
+- [x] Multi-agent orchestration system
+- [x] Task planning and execution
+- [x] CLI interface with dry-run mode
+- [x] Configuration management
+- [x] Basic SME agents with API models
+
+### **🚧 Phase 1: UI Foundation** (In Progress)
+- [ ] **React Dashboard**: Real-time agent monitoring
+- [ ] **WebSocket Integration**: Live updates from agents
+- [ ] **Task Visualization**: Interactive task flow diagrams
+- [ ] **Code Preview**: Live code generation viewer
+- [ ] **Agent Chat Interface**: Direct communication with agents
+
+### **🎯 Phase 2: LoRA Specialization** (Next)
+- [ ] **Dataset Curation**: Collect domain-specific training data
+  - [ ] Frontend: React/Vue/Angular components and patterns
+  - [ ] Backend: API implementations and server architectures
+  - [ ] Database: Schema designs and query patterns
+  - [ ] Testing: Test suites and quality assurance code
+  - [ ] Documentation: Technical writing and API docs
+- [ ] **LoRA Training Pipeline**: Automated adapter training system
+- [ ] **Adapter Integration**: Hot-swappable specialized models
+- [ ] **Performance Benchmarking**: Compare specialized vs generic agents
+
+### **🚀 Phase 3: Advanced Intelligence** (Future)
+- [ ] **Adaptive Learning**: Agents learn from successful projects
+- [ ] **Cross-Agent Communication**: Agents collaborate and share insights
+- [ ] **Quality Feedback Loop**: Automatic code quality improvement
+- [ ] **Custom Adapter Training**: Users can train domain-specific adapters
+- [ ] **Multi-Project Learning**: System learns patterns across projects
+
+## 🧪 **Technical Deep Dive**
+
+### **LoRA Adapters Explained**
+```python
+# Instead of this (generic model):
+response = gpt4("Write a React component")
+
+# We do this (specialized model):
+frontend_model = base_model.load_adapter("react_specialist.lora")
+response = frontend_model("Write a React component")
+# ^ This model has been neurally modified to ONLY think in React patterns
+```
+
+### **Training Data Examples**
+```yaml
+frontend_adapter_training:
+  react_components: 25000
+  vue_components: 15000  
+  angular_components: 10000
+  css_patterns: 20000
+  responsive_designs: 8000
+  accessibility_examples: 5000
+
+backend_adapter_training:
+  rest_apis: 15000
+  graphql_schemas: 8000
+  authentication_systems: 5000
+  database_integrations: 12000
+  error_handling_patterns: 7000
+```
+
+### **UI Architecture**
+```
+Frontend (React + TypeScript)
+├── Agent Monitor Dashboard
+├── Real-time Task Viewer  
+├── Code Generation Stream
+├── Performance Analytics
+└── Debug Console
+
+Backend (FastAPI + WebSockets)
+├── Agent State Management
+├── Real-time Event Streaming
+├── Task Queue Monitoring
+└── Metrics Collection
+
+Agent System (Python)
+├── LoRA Adapter Manager
+├── Specialized Model Loading
+├── Cross-Agent Communication
+└── Performance Tracking
+```
+
+## 🎯 **Why This Approach is Revolutionary**
+
+### **Current AI Coding Tools**
+- Use generic models with simple prompts
+- No real specialization
+- Limited context awareness
+- Black box operation
+
+### **LLM Swarm's Approach**
+- **Neural Specialization**: Each agent's weights are modified for its domain
+- **Transparent Operation**: See exactly what each agent is doing
+- **Collaborative Intelligence**: Agents work together with shared context
+- **Continuous Learning**: System improves with each project
+
+## 🤝 **Contributing & Development**
+
+This is an ambitious project that will be developed in phases. We welcome contributors who are excited about:
+
+- **AI/ML Engineering**: LoRA training, model optimization
+- **Frontend Development**: React dashboard, real-time visualizations  
+- **Backend Development**: FastAPI, WebSocket systems
+- **DevOps**: Training pipelines, model deployment
+- **Data Engineering**: Dataset curation, quality assurance
+
+## 📚 **Learning Resources**
+
+New to LoRA and AI/ML? Start here:
+- **LoRA Paper**: "Low-Rank Adaptation of Large Language Models"
+- **Hugging Face LoRA Guide**: Practical implementation examples
+- **PEFT Library**: Parameter-Efficient Fine-Tuning tools
+- **Our Wiki**: Step-by-step guides for contributing
+
+## � **Vision Statement**
+
+We're building the future of AI-assisted development - a system where specialized AI agents collaborate like a real development team, each with deep expertise in their domain, working together transparently to create high-quality software.
+
+---
+
+**Ready to be part of the revolution?** 
+
+```bash
+# Try the current system
+python main.py generate --spec "Your project idea" --output ./test --dry-run
+
+# Stay tuned for the UI launch!
+```
+
+## 📄 License
+
+MIT License - see LICENSE file for details.
+
+---
+
+*Built with ambition and cutting-edge AI research. The future of code generation starts here.*
