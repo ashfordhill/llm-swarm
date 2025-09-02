@@ -275,3 +275,22 @@ class FileManager:
             "file_count": file_count,
             "directory_count": dir_count
         }
+    
+    def get_generated_files(self) -> List[Path]:
+        """
+        Get list of all generated files in the project.
+        
+        Returns:
+            List of Path objects for all generated files
+        """
+        generated_files = []
+        
+        if not self.output_dir.exists():
+            return generated_files
+        
+        for root, dirs, files in os.walk(self.output_dir):
+            for file in files:
+                file_path = Path(root) / file
+                generated_files.append(file_path)
+        
+        return generated_files

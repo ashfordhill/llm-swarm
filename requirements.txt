@@ -9,8 +9,17 @@ jinja2>=3.1.0
 rich>=13.0.0
 click>=8.1.0
 
+# UI Backend dependencies
+fastapi>=0.104.0
+uvicorn>=0.24.0
+websockets>=12.0
+
+# LoRA specialization dependencies
+peft>=0.6.0
+datasets>=2.14.0
+accelerate>=0.24.0
+bitsandbytes>=0.41.0
+
 # Optional dependencies for enhanced functionality
 # langchain>=0.0.300  # For advanced agent orchestration
 # huggingface-hub>=0.17.0  # For model management
-# accelerate>=0.24.0  # For optimized model loading
-# bitsandbytes>=0.41.0  # For quantization support

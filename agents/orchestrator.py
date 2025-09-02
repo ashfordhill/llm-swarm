@@ -20,6 +20,13 @@ from .database_agent import DatabaseAgent
 from .testing_agent import TestingAgent
 from .documentation_agent import DocumentationAgent
 
+# Import learning system
+try:
+    from learning.learning_manager import LearningManager
+    LEARNING_AVAILABLE = True
+except ImportError:
+    LEARNING_AVAILABLE = False
+
 
 class APIAgent:
     """
@@ -140,6 +147,17 @@ class Orchestrator:
         # Track execution state
         self.project_context = {}
         self.execution_log = []
+        
+        # Initialize learning system
+        self.learning_manager = None
+        if LEARNING_AVAILABLE:
+            try:
+                self.learning_manager = LearningManager()
+                self.logger.info("Adaptive learning system initialized")
+            except Exception as e:
+                self.logger.warning(f"Failed to initialize learning system: {e}")
+        else:
+            self.logger.info("Learning system not available - install learning dependencies")
         
         self.logger.info("Orchestrator initialized successfully")
     
@@ -392,16 +410,35 @@ class Orchestrator:
                 
                 # Execute task
                 task.status = TaskStatus.IN_PROGRESS
+                start_time = time.time()
                 output = agent.run_task(task, self.project_context)
+                execution_time = time.time() - start_time
                 
                 if output.success:
                     # Save generated files
+                    files_created = []
                     if output.files:
                         written_files = self.file_manager.write_files(output.files)
+                        files_created = [str(f) for f in written_files]
                         self.logger.info(f"Generated {len(written_files)} files")
                     
                     task.mark_completed(output)
                     completed_tasks.add(task.id)
+                    
+                    # Collect task feedback for learning
+                    if self.learning_manager:
+                        try:
+                            self.learning_manager.feedback_collector.collect_task_feedback(
+                                task=task,
+                                agent_type=agent.name,
+                                execution_time=execution_time,
+                                success=True,
+                                input_prompt=task.description,
+                                generated_output=output.summary,
+                                files_created=files_created
+                            )
+                        except Exception as e:
+                            self.logger.warning(f"Failed to collect task feedback: {e}")
                     
                     # Log execution
                     self.execution_log.append({
@@ -410,12 +447,28 @@ class Orchestrator:
                         "agent": agent.name,
                         "status": "completed",
                         "files_generated": len(output.files),
+                        "execution_time": execution_time,
                         "timestamp": time.time()
                     })
                     
                 else:
                     task.mark_failed(output.error or "Unknown error")
                     self.logger.error(f"Task failed: {task.name} - {output.error}")
+                    
+                    # Collect task feedback for failed tasks too
+                    if self.learning_manager:
+                        try:
+                            self.learning_manager.feedback_collector.collect_task_feedback(
+                                task=task,
+                                agent_type=agent.name,
+                                execution_time=execution_time,
+                                success=False,
+                                input_prompt=task.description,
+                                generated_output=output.error or "Task failed",
+                                files_created=[]
+                            )
+                        except Exception as e:
+                            self.logger.warning(f"Failed to collect task feedback: {e}")
                     
                     # Log failure
                     self.execution_log.append({
@@ -424,6 +477,7 @@ class Orchestrator:
                         "agent": agent.name,
                         "status": "failed",
                         "error": output.error,
+                        "execution_time": execution_time,
                         "timestamp": time.time()
                     })
             
@@ -487,6 +541,57 @@ class Orchestrator:
             
             # Get project statistics
             size_info = self.file_manager.get_size_info()
+            status_summary = self.dependency_graph.get_status_summary()
+            
+            # Collect project-level feedback for learning
+            if self.learning_manager:
+                try:
+                    # Calculate project metrics
+                    total_tasks = status_summary[TaskStatus.COMPLETED] + status_summary[TaskStatus.FAILED]
+                    success_rate = status_summary[TaskStatus.COMPLETED] / max(total_tasks, 1)
+                    total_time = sum(log.get('execution_time', 0) for log in self.execution_log)
+                    
+                    # Prepare agent performance data
+                    agent_performance = {}
+                    for log in self.execution_log:
+                        agent_name = log['agent']
+                        if agent_name not in agent_performance:
+                            agent_performance[agent_name] = {
+                                'tasks_completed': 0,
+                                'tasks_failed': 0,
+                                'total_execution_time': 0.0
+                            }
+                        
+                        if log['status'] == 'completed':
+                            agent_performance[agent_name]['tasks_completed'] += 1
+                        else:
+                            agent_performance[agent_name]['tasks_failed'] += 1
+                        
+                        agent_performance[agent_name]['total_execution_time'] += log.get('execution_time', 0)
+                    
+                    # Prepare generated files data
+                    generated_files = []
+                    for file_path in self.file_manager.get_generated_files():
+                        generated_files.append({
+                            'path': str(file_path),
+                            'size': file_path.stat().st_size if file_path.exists() else 0
+                        })
+                    
+                    # Collect project feedback
+                    project_id = f"project_{int(time.time())}"
+                    self.learning_manager.collect_project_feedback(
+                        project_id=project_id,
+                        specification=self.project_context.get('description', 'Unknown'),
+                        completion_time=total_time,
+                        success_rate=success_rate,
+                        agent_performance=agent_performance,
+                        generated_files=generated_files
+                    )
+                    
+                    self.logger.info("Project feedback collected for adaptive learning")
+                    
+                except Exception as e:
+                    self.logger.warning(f"Failed to collect project feedback: {e}")
             
             self.logger.info("✅ Project generation completed successfully!")
             self.logger.info(f"📊 Generated {size_info['file_count']} files ({size_info['total_size_mb']} MB)")

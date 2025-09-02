@@ -148,10 +148,14 @@ class BaseAgent(ABC):
         
         # Get task prompt template
         task_template_name = f"{self.agent_type.value}_task"
+        
+        # Create enhanced project context for the agent
+        enhanced_context = self._create_enhanced_context(project_context)
+        
         task_prompt = self.prompt_templates.render_template(
             task_template_name,
             task_description=task.description,
-            project_context=project_context.get("description", ""),
+            project_context=enhanced_context,
             dependencies=task.context.get("completed_dependencies", [])
         )
         
@@ -160,6 +164,79 @@ class BaseAgent(ABC):
         
         self.logger.debug(f"Prepared prompt for task {task.id} ({len(full_prompt)} chars)")
         return full_prompt
+    
+    def _create_enhanced_context(self, project_context: Dict[str, Any]) -> str:
+        """
+        Create enhanced context string for the agent with tech stack information.
+        
+        Args:
+            project_context: Full project context from chunk executor
+            
+        Returns:
+            Formatted context string for the agent
+        """
+        context_parts = []
+        
+        # Project description
+        if 'description' in project_context:
+            context_parts.append(f"Project: {project_context['description']}")
+        
+        # Tech stack information
+        if 'tech_stack' in project_context:
+            tech_stack = project_context['tech_stack']
+            context_parts.append("\nTech Stack:")
+            
+            if 'frontend' in tech_stack:
+                context_parts.append(f"- Frontend: {', '.join(tech_stack['frontend'])}")
+            if 'backend' in tech_stack:
+                context_parts.append(f"- Backend: {', '.join(tech_stack['backend'])}")
+            if 'database' in tech_stack:
+                context_parts.append(f"- Database: {', '.join(tech_stack['database'])}")
+        
+        # Framework-specific instructions
+        if 'framework_context' in project_context:
+            framework_context = project_context['framework_context']
+            
+            if 'primary_frameworks' in framework_context:
+                primary = framework_context['primary_frameworks']
+                if primary:
+                    context_parts.append(f"\nPrimary Frameworks: {primary}")
+            
+            if 'specific_instructions' in framework_context:
+                instructions = framework_context['specific_instructions']
+                if instructions:
+                    context_parts.append("\nFramework Instructions:")
+                    for instruction in instructions:
+                        context_parts.append(f"- {instruction}")
+            
+            if 'code_examples' in framework_context:
+                examples = framework_context['code_examples']
+                if examples and self.agent_type.value == 'frontend':
+                    # Only show relevant examples for frontend agents
+                    if 'react_component' in examples:
+                        context_parts.append(f"\nReact Component Example:\n{examples['react_component']}")
+                    elif 'vue_component' in examples:
+                        context_parts.append(f"\nVue Component Example:\n{examples['vue_component']}")
+                elif examples and self.agent_type.value == 'backend':
+                    if 'express_route' in examples:
+                        context_parts.append(f"\nExpress Route Example:\n{examples['express_route']}")
+                elif examples and self.agent_type.value == 'database':
+                    if 'mongoose_model' in examples:
+                        context_parts.append(f"\nMongoose Model Example:\n{examples['mongoose_model']}")
+        
+        # Architecture information
+        if 'architecture' in project_context:
+            arch = project_context['architecture']
+            if isinstance(arch, dict) and 'pattern' in arch:
+                context_parts.append(f"\nArchitecture Pattern: {arch['pattern']}")
+        
+        # Dependencies
+        if 'dependencies' in project_context:
+            deps = project_context['dependencies']
+            if deps:
+                context_parts.append(f"\nKey Dependencies: {', '.join(deps[:5])}")  # Show first 5
+        
+        return '\n'.join(context_parts)
     
     def _generate_with_retries(self, prompt: str) -> str:
         """
@@ -374,10 +451,52 @@ class SMEAgent(BaseAgent):
             self.logger.error(f"Failed to load model: {e}")
             raise
     
+    def _load_api_client(self) -> None:
+        """Load API client for this agent."""
+        try:
+            self.logger.info(f"Loading API client for: {self.model_config.model_id}")
+            
+            # Infer provider from model_id
+            provider = self._infer_provider(self.model_config.model_id)
+            
+            if provider == "openai":
+                import openai
+                self.api_client = openai.OpenAI()
+            elif provider == "anthropic":
+                import anthropic
+                self.api_client = anthropic.Anthropic()
+            else:
+                raise ValueError(f"Unsupported API provider: {provider}")
+            
+            self.logger.info("API client loaded successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to load API client: {e}")
+            raise
+    
+    def _infer_provider(self, model_id: str) -> str:
+        """Infer the API provider from model ID."""
+        if model_id.startswith("gpt-") or model_id.startswith("text-") or model_id.startswith("davinci"):
+            return "openai"
+        elif model_id.startswith("claude-"):
+            return "anthropic"
+        else:
+            # Default to OpenAI for unknown models
+            return "openai"
+    
     def _generate_response(self, prompt: str) -> str:
+        """Generate response using either local model or API."""
+        if self.model_config.type == "local":
+            return self._generate_local_response(prompt)
+        elif self.model_config.type == "api":
+            return self._generate_api_response(prompt)
+        else:
+            raise ValueError(f"Unsupported model type: {self.model_config.type}")
+    
+    def _generate_local_response(self, prompt: str) -> str:
         """Generate response using the local model."""
         if not self.model or not self.tokenizer:
-            raise RuntimeError("Model not loaded")
+            raise RuntimeError("Local model not loaded")
         
         try:
             # Tokenize input
@@ -411,7 +530,40 @@ class SMEAgent(BaseAgent):
             return response.strip()
             
         except Exception as e:
-            self.logger.error(f"Generation failed: {e}")
+            self.logger.error(f"Local generation failed: {e}")
+            raise
+    
+    def _generate_api_response(self, prompt: str) -> str:
+        """Generate response using API client."""
+        if not self.api_client:
+            raise RuntimeError("API client not loaded")
+        
+        try:
+            provider = self._infer_provider(self.model_config.model_id)
+            
+            if provider == "openai":
+                response = self.api_client.chat.completions.create(
+                    model=self.model_config.model_id,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=self.model_config.max_tokens,
+                    temperature=self.model_config.temperature
+                )
+                return response.choices[0].message.content.strip()
+            
+            elif provider == "anthropic":
+                response = self.api_client.messages.create(
+                    model=self.model_config.model_id,
+                    max_tokens=self.model_config.max_tokens,
+                    temperature=self.model_config.temperature,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                return response.content[0].text.strip()
+            
+            else:
+                raise ValueError(f"Unsupported API provider: {provider}")
+                
+        except Exception as e:
+            self.logger.error(f"API generation failed: {e}")
             raise
     
     def __del__(self):
